@@ -48,10 +48,6 @@ RUN chmod +x /docker-entrypoint.sh
 # Port
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider https://paper-agent-frontend-production.up.railway.app/ || exit 1
-
 # Use custom entrypoint
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
