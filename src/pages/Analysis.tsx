@@ -99,7 +99,7 @@ export default function Analysis() {
     queryKey: ['dataSources'],
     queryFn: getDataSources,
   })
-  const dataSources = allDataSources.filter(ds => ds.id !== 'openalex')
+  const dataSources = allDataSources
 
   const { data: queryExamples = {} } = useQuery({
     queryKey: ['queryExamples'],
