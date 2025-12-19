@@ -46,11 +46,11 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # Port
-EXPOSE 80
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:80/ || exit 1
+    CMD wget --quiet --tries=1 --spider https://paper-agent-frontend-production.up.railway.app/ || exit 1
 
 # Use custom entrypoint
 ENTRYPOINT ["/docker-entrypoint.sh"]
