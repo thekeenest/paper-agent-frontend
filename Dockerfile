@@ -1,53 +1,26 @@
-# Frontend Dockerfile for Conference Paper Agent
-# Multi-stage build: Node.js build + Nginx serve
 
-# ============================================================
-# Stage 1: Build
-# ============================================================
-FROM node:20-alpine as builder
+# Frontend Dockerfile
+FROM node:20-alpine
 
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json* ./
+COPY package*.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm install
 
-# Copy source code
+# Copy the rest of the frontend code
 COPY . .
-
-# Build arguments for environment variables
-ARG VITE_API_URL
-ARG VITE_WS_URL
-
-ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_WS_URL=$VITE_WS_URL
 
 # Build the application
 RUN npm run build
 
-# ============================================================
-# Stage 2: Serve with Nginx
-# ============================================================
-FROM nginx:alpine as runtime
+# Install serve to serve static files
+RUN npm install -g serve
 
-# Copy custom nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy built files
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Create env-config.js script for runtime environment variables
-RUN echo 'window.ENV = {};' > /usr/share/nginx/html/env-config.js
-
-# Script to inject environment variables at runtime
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-
-# Port
+# Expose the port
 EXPOSE 8080
 
-# Use custom entrypoint
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["nginx", "-g", "daemon off;"]
+# Serve the built application
+CMD ["serve", "-s", "dist", "-l", "8080"]
