@@ -46,7 +46,7 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 export default function TaskDetail() {
   const { taskId } = useParams<{ taskId: string }>()
   const queryClient = useQueryClient()
-  const { setTaskProgress, setWsConnected } = useTaskStore()
+  const { taskProgress, setTaskProgress, setWsConnected } = useTaskStore()
   const [activeTab, setActiveTab] = useState('overview')
 
   // Fetch task status
@@ -55,7 +55,8 @@ export default function TaskDetail() {
     queryFn: () => getTaskStatus(taskId!),
     enabled: !!taskId,
     refetchInterval: (query) => {
-      return query.state.data?.status === 'running' ? 2000 : false
+      // Only poll every 5 seconds as backup - WebSocket handles real-time
+      return query.state.data?.status === 'running' ? 5000 : false
     },
   })
 
@@ -83,35 +84,91 @@ export default function TaskDetail() {
 
   // WebSocket connection for real-time updates
   useEffect(() => {
-    if (!taskId || status?.status !== 'running') return
-
-    const ws = createWebSocket(taskId)
-    
-    ws.onopen = () => {
-      setWsConnected(true)
+    if (!taskId || status?.status !== 'running') {
+      setWsConnected(false)
+      return
     }
 
-    ws.onmessage = (event) => {
-      try {
-        const message: WSMessage = JSON.parse(event.data)
-        
-        if (message.type === 'progress') {
-          setTaskProgress(message.data as TaskProgress)
-        } else if (message.type === 'completed') {
-          queryClient.invalidateQueries({ queryKey: ['taskStatus', taskId] })
-          queryClient.invalidateQueries({ queryKey: ['taskResults', taskId] })
+    let ws: WebSocket | null = null
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+    let isMounted = true
+
+    const connect = () => {
+      if (!isMounted) return
+      
+      ws = createWebSocket(taskId)
+      
+      ws.onopen = () => {
+        console.log('[WS TaskDetail] Connected to task', taskId)
+        setWsConnected(true)
+      }
+
+      ws.onmessage = (event) => {
+        // Ignore ping/pong text messages
+        if (event.data === 'ping' || event.data === 'pong') {
+          if (event.data === 'ping' && ws) ws.send('pong')
+          return
         }
-      } catch (e) {
-        console.error('WebSocket parse error:', e)
+        
+        try {
+          const message: WSMessage = JSON.parse(event.data)
+          
+          if (message.type === 'progress') {
+            // Always update from progress messages - they are real-time
+            setTaskProgress(message.data as TaskProgress)
+          } else if (message.type === 'status') {
+            // Initial status message - only use if we don't have progress or if it's more recent
+            const statusData = message.data as any
+            const currentProgress = useTaskStore.getState().taskProgress
+            if (!currentProgress || statusData.processed_papers > currentProgress.processed) {
+              setTaskProgress({
+                task_id: statusData.task_id,
+                stage: statusData.stage,
+                progress: statusData.progress,
+                message: `Processing ${statusData.current_paper_title || '...'}`,
+                current_paper: statusData.current_paper_title,
+                processed: statusData.processed_papers,
+                total: statusData.total_papers,
+                timestamp: statusData.updated_at || new Date().toISOString(),
+              })
+            }
+          } else if (message.type === 'completed') {
+            queryClient.invalidateQueries({ queryKey: ['taskStatus', taskId] })
+            queryClient.invalidateQueries({ queryKey: ['taskResults', taskId] })
+            queryClient.invalidateQueries({ queryKey: ['taskAnalytics', taskId] })
+            queryClient.invalidateQueries({ queryKey: ['activeTask'] })
+          }
+        } catch (e) {
+          // Ignore parse errors for non-JSON messages
+        }
+      }
+
+      ws.onerror = () => {
+        console.log('[WS TaskDetail] Error, will reconnect...')
+      }
+
+      ws.onclose = () => {
+        console.log('[WS TaskDetail] Closed')
+        setWsConnected(false)
+        // Reconnect after 2 seconds if still mounted and task is running
+        if (isMounted && status?.status === 'running') {
+          reconnectTimeout = setTimeout(() => {
+            console.log('[WS TaskDetail] Reconnecting...')
+            connect()
+          }, 2000)
+        }
       }
     }
 
-    ws.onclose = () => {
-      setWsConnected(false)
-    }
+    connect()
 
     return () => {
-      ws.close()
+      isMounted = false
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      if (ws) {
+        ws.onclose = null // Prevent reconnection on cleanup
+        ws.close()
+      }
     }
   }, [taskId, status?.status, setTaskProgress, setWsConnected, queryClient])
 
@@ -142,18 +199,18 @@ export default function TaskDetail() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="space-y-1 min-w-0">
           <Link 
             to="/results"
-            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3 sm:mb-4"
           >
             <ArrowLeft className="h-4 w-4" />
             Back to Results
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight">Task Details</h1>
-          <div className="flex items-center gap-3">
-            <code className="text-sm bg-muted px-2 py-1 rounded">{taskId}</code>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Task Details</h1>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <code className="text-xs sm:text-sm bg-muted px-2 py-1 rounded truncate max-w-[200px] sm:max-w-none">{taskId}</code>
             <Badge variant={
               isCompleted ? 'success' :
               isFailed ? 'destructive' :
@@ -166,9 +223,9 @@ export default function TaskDetail() {
         <div className="flex items-center gap-2">
           {isCompleted && results?.output_files && Object.keys(results.output_files).length > 0 && (
             <a href={getDownloadUrl(taskId, Object.keys(results.output_files)[0])} download>
-              <Button variant="outline" className="gap-2">
+              <Button variant="outline" className="gap-2" size="sm">
                 <Download className="h-4 w-4" />
-                Download CSV
+                <span className="hidden sm:inline">Download</span> CSV
               </Button>
             </a>
           )}
@@ -230,74 +287,74 @@ export default function TaskDetail() {
       {/* Main Content (when completed) */}
       {isCompleted && analytics && (
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="organizations">Organizations</TabsTrigger>
-            <TabsTrigger value="geography">Geography</TabsTrigger>
-            <TabsTrigger value="papers">Papers</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
+            <TabsTrigger value="overview" className="text-xs sm:text-sm py-2">Overview</TabsTrigger>
+            <TabsTrigger value="organizations" className="text-xs sm:text-sm py-2">Organizations</TabsTrigger>
+            <TabsTrigger value="geography" className="text-xs sm:text-sm py-2">Geography</TabsTrigger>
+            <TabsTrigger value="papers" className="text-xs sm:text-sm py-2">Papers</TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6">
+          <TabsContent value="overview" className="space-y-4 sm:space-y-6">
             {/* Stats Cards */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Total Papers</CardTitle>
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <CardTitle className="text-xs sm:text-sm font-medium">Total Papers</CardTitle>
                   <FileText className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatNumber(analytics.total_papers)}</div>
+                  <div className="text-xl sm:text-2xl font-bold">{formatNumber(analytics.total_papers)}</div>
                 </CardContent>
               </Card>
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Total Authors</CardTitle>
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <CardTitle className="text-xs sm:text-sm font-medium">Total Authors</CardTitle>
                   <Users className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatNumber(analytics.total_authors)}</div>
+                  <div className="text-xl sm:text-2xl font-bold">{formatNumber(analytics.total_authors)}</div>
                   <p className="text-xs text-muted-foreground">
                     {analytics.unique_authors} unique
                   </p>
                 </CardContent>
               </Card>
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Organizations</CardTitle>
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <CardTitle className="text-xs sm:text-sm font-medium">Organizations</CardTitle>
                   <Building2 className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatNumber(analytics.unique_organizations)}</div>
+                  <div className="text-xl sm:text-2xl font-bold">{formatNumber(analytics.unique_organizations)}</div>
                 </CardContent>
               </Card>
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Countries</CardTitle>
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <CardTitle className="text-xs sm:text-sm font-medium">Countries</CardTitle>
                   <Globe className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatNumber(analytics.unique_countries)}</div>
+                  <div className="text-xl sm:text-2xl font-bold">{formatNumber(analytics.unique_countries)}</div>
                 </CardContent>
               </Card>
             </div>
 
             {/* Charts Row */}
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
               {/* Top Organizations */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5" />
+                <CardHeader className="pb-2 sm:pb-4">
+                  <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
+                    <BarChart3 className="h-4 sm:h-5 w-4 sm:w-5" />
                     Top Organizations
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={topOrgsData} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
+                      <XAxis type="number" tick={{ fontSize: 10 }} />
+                      <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 10 }} />
                       <Tooltip 
                         formatter={(value, name, props) => [value, props.payload.fullName]}
                       />
@@ -309,14 +366,14 @@ export default function TaskDetail() {
 
               {/* Organization Types */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <PieChartIcon className="h-5 w-5" />
+                <CardHeader className="pb-2 sm:pb-4">
+                  <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
+                    <PieChartIcon className="h-4 sm:h-5 w-4 sm:w-5" />
                     Organization Types
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
                       <Pie
                         data={orgTypeData}
@@ -324,7 +381,7 @@ export default function TaskDetail() {
                         cy="50%"
                         labelLine={false}
                         label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                        outerRadius={100}
+                        outerRadius={80}
                         fill="#8884d8"
                         dataKey="value"
                       >
@@ -341,30 +398,30 @@ export default function TaskDetail() {
 
             {/* Processing Info */}
             <Card>
-              <CardHeader>
-                <CardTitle>Processing Information</CardTitle>
+              <CardHeader className="pb-2 sm:pb-4">
+                <CardTitle className="text-sm sm:text-base">Processing Information</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
                   <div>
-                    <p className="text-sm text-muted-foreground">Query</p>
-                    <p className="font-mono">{status?.query}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Query</p>
+                    <p className="font-mono text-xs sm:text-sm truncate">{status?.query}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Data Source</p>
-                    <p className="capitalize">{analytics.data_source}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Data Source</p>
+                    <p className="capitalize text-sm">{analytics.data_source}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Processing Time</p>
-                    <p>{formatDuration(analytics.processing_time_seconds)}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Processing Time</p>
+                    <p className="text-sm">{formatDuration(analytics.processing_time_seconds)}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Avg Authors/Paper</p>
-                    <p>{analytics.avg_authors_per_paper.toFixed(1)}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Avg Authors/Paper</p>
+                    <p className="text-sm">{analytics.avg_authors_per_paper.toFixed(1)}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Avg Confidence</p>
-                    <p>{formatPercentage(analytics.avg_confidence * 100)}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Avg Confidence</p>
+                    <p className="text-sm">{formatPercentage(analytics.avg_confidence * 100)}</p>
                   </div>
                 </div>
               </CardContent>
@@ -374,42 +431,44 @@ export default function TaskDetail() {
           {/* Organizations Tab */}
           <TabsContent value="organizations">
             <Card>
-              <CardHeader>
-                <CardTitle>Top 20 Organizations</CardTitle>
-                <CardDescription>Organizations by number of authors</CardDescription>
+              <CardHeader className="pb-2 sm:pb-4">
+                <CardTitle className="text-sm sm:text-base">Top 20 Organizations</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">Organizations by number of authors</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={500}>
-                  <BarChart data={analytics.top_organizations.slice(0, 20)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" />
-                    <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    <Bar dataKey="author_count" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="hidden sm:block">
+                  <ResponsiveContainer width="100%" height={500}>
+                    <BarChart data={analytics.top_organizations.slice(0, 20)} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" />
+                      <YAxis type="category" dataKey="name" width={180} tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar dataKey="author_count" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
                 
-                <div className="mt-6 overflow-auto">
-                  <table className="w-full text-sm">
+                <div className="mt-4 sm:mt-6 overflow-x-auto -mx-4 sm:mx-0">
+                  <table className="w-full text-xs sm:text-sm min-w-[500px]">
                     <thead>
                       <tr className="border-b">
-                        <th className="text-left py-2">Organization</th>
-                        <th className="text-left py-2">Country</th>
-                        <th className="text-left py-2">Type</th>
-                        <th className="text-right py-2">Authors</th>
-                        <th className="text-right py-2">%</th>
+                        <th className="text-left py-2 px-2">Organization</th>
+                        <th className="text-left py-2 px-2">Country</th>
+                        <th className="text-left py-2 px-2">Type</th>
+                        <th className="text-right py-2 px-2">Authors</th>
+                        <th className="text-right py-2 px-2">%</th>
                       </tr>
                     </thead>
                     <tbody>
                       {analytics.top_organizations.map((org, i) => (
                         <tr key={i} className="border-b">
-                          <td className="py-2">{org.name}</td>
-                          <td className="py-2">{org.country || '-'}</td>
-                          <td className="py-2">
-                            <Badge variant="outline">{org.org_type}</Badge>
+                          <td className="py-2 px-2 max-w-[150px] truncate">{org.name}</td>
+                          <td className="py-2 px-2">{org.country || '-'}</td>
+                          <td className="py-2 px-2">
+                            <Badge variant="outline" className="text-xs">{org.org_type}</Badge>
                           </td>
-                          <td className="text-right py-2">{org.author_count}</td>
-                          <td className="text-right py-2">{formatPercentage(org.percentage)}</td>
+                          <td className="text-right py-2 px-2">{org.author_count}</td>
+                          <td className="text-right py-2 px-2">{formatPercentage(org.percentage)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -421,13 +480,13 @@ export default function TaskDetail() {
 
           {/* Geography Tab */}
           <TabsContent value="geography">
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
               <Card>
-                <CardHeader>
-                  <CardTitle>Country Distribution</CardTitle>
+                <CardHeader className="pb-2 sm:pb-4">
+                  <CardTitle className="text-sm sm:text-base">Country Distribution</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={400}>
+                  <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
                       <Pie
                         data={countryData}
@@ -435,7 +494,7 @@ export default function TaskDetail() {
                         cy="50%"
                         labelLine={true}
                         label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                        outerRadius={130}
+                        outerRadius={100}
                         fill="#8884d8"
                         dataKey="value"
                       >
@@ -444,33 +503,33 @@ export default function TaskDetail() {
                         ))}
                       </Pie>
                       <Tooltip />
-                      <Legend />
+                      <Legend wrapperStyle={{ fontSize: '12px' }} />
                     </PieChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardHeader>
-                  <CardTitle>All Countries</CardTitle>
+                <CardHeader className="pb-2 sm:pb-4">
+                  <CardTitle className="text-sm sm:text-base">All Countries</CardTitle>
                 </CardHeader>
-                <CardContent className="max-h-[500px] overflow-auto">
-                  <table className="w-full text-sm">
+                <CardContent className="max-h-[400px] sm:max-h-[500px] overflow-auto -mx-4 sm:mx-0">
+                  <table className="w-full text-xs sm:text-sm min-w-[350px]">
                     <thead className="sticky top-0 bg-card">
                       <tr className="border-b">
-                        <th className="text-left py-2">Country</th>
-                        <th className="text-right py-2">Authors</th>
-                        <th className="text-right py-2">Orgs</th>
-                        <th className="text-right py-2">%</th>
+                        <th className="text-left py-2 px-2">Country</th>
+                        <th className="text-right py-2 px-2">Authors</th>
+                        <th className="text-right py-2 px-2">Orgs</th>
+                        <th className="text-right py-2 px-2">%</th>
                       </tr>
                     </thead>
                     <tbody>
                       {analytics.country_distribution.map((country, i) => (
                         <tr key={i} className="border-b">
-                          <td className="py-2">{country.country}</td>
-                          <td className="text-right py-2">{country.author_count}</td>
-                          <td className="text-right py-2">{country.org_count}</td>
-                          <td className="text-right py-2">{formatPercentage(country.percentage)}</td>
+                          <td className="py-2 px-2">{country.country}</td>
+                          <td className="text-right py-2 px-2">{country.author_count}</td>
+                          <td className="text-right py-2 px-2">{country.org_count}</td>
+                          <td className="text-right py-2 px-2">{formatPercentage(country.percentage)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -483,41 +542,46 @@ export default function TaskDetail() {
           {/* Papers Tab */}
           <TabsContent value="papers">
             <Card>
-              <CardHeader>
-                <CardTitle>Processed Papers</CardTitle>
-                <CardDescription>{results?.papers.length || 0} papers</CardDescription>
+              <CardHeader className="pb-2 sm:pb-4">
+                <CardTitle className="text-sm sm:text-base">Processed Papers</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">{results?.papers.length || 0} papers</CardDescription>
               </CardHeader>
-              <CardContent className="max-h-[600px] overflow-auto">
-                <div className="space-y-4">
+              <CardContent className="max-h-[500px] sm:max-h-[600px] overflow-auto">
+                <div className="space-y-3 sm:space-y-4">
                   {results?.papers.map((paper, i) => (
-                    <div key={i} className="p-4 border rounded-lg">
-                      <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-medium">{paper.title}</h3>
-                        <Badge variant="outline">{paper.paper_id}</Badge>
+                    <div key={i} className="p-3 sm:p-4 border rounded-lg">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 mb-2">
+                        <h3 className="font-medium text-sm sm:text-base line-clamp-2">{paper.title}</h3>
+                        <Badge variant="outline" className="text-xs flex-shrink-0 self-start">{paper.paper_id}</Badge>
                       </div>
                       <div className="flex flex-wrap gap-1 mb-2">
-                        {paper.categories.map((cat, j) => (
+                        {paper.categories.slice(0, 3).map((cat, j) => (
                           <Badge key={j} variant="secondary" className="text-xs">
                             {cat}
                           </Badge>
                         ))}
+                        {paper.categories.length > 3 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{paper.categories.length - 3}
+                          </Badge>
+                        )}
                       </div>
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-xs sm:text-sm text-muted-foreground">
                         <p className="mb-2">{paper.authors.length} authors</p>
-                        <div className="flex flex-wrap gap-2">
-                          {paper.authors.slice(0, 5).map((author, j) => (
+                        <div className="flex flex-wrap gap-1 sm:gap-2">
+                          {paper.authors.slice(0, 4).map((author, j) => (
                             <span key={j} className="inline-flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs">
                               {author.name}
                               {author.normalized_affiliation && (
-                                <span className="text-muted-foreground">
-                                  ({truncate(author.normalized_affiliation, 20)})
+                                <span className="text-muted-foreground hidden sm:inline">
+                                  ({truncate(author.normalized_affiliation, 15)})
                                 </span>
                               )}
                             </span>
                           ))}
-                          {paper.authors.length > 5 && (
-                            <span className="text-xs text-muted-foreground">
-                              +{paper.authors.length - 5} more
+                          {paper.authors.length > 4 && (
+                            <span className="text-xs text-muted-foreground self-center">
+                              +{paper.authors.length - 4} more
                             </span>
                           )}
                         </div>

@@ -25,24 +25,38 @@ const API_BASE = window.ENV?.VITE_API_URL || import.meta.env.VITE_API_URL || ''
 
 async function fetchApi<T>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit,
+  retries = 2
 ): Promise<T> {
   const url = `${API_BASE}${endpoint}`
   
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+      })
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }))
-    throw new Error(error.detail || `HTTP error ${response.status}`)
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Unknown error' }))
+        throw new Error(error.detail || `HTTP error ${response.status}`)
+      }
+
+      return response.json()
+    } catch (error) {
+      // Retry on network errors (backend not ready yet)
+      if (attempt < retries && error instanceof TypeError) {
+        await new Promise(r => setTimeout(r, 1000)) // Wait 1 second before retry
+        continue
+      }
+      throw error
+    }
   }
-
-  return response.json()
+  
+  throw new Error('Failed after retries')
 }
 
 // Health check
@@ -112,6 +126,11 @@ export async function getDataSources(): Promise<DataSource[]> {
 
 export async function getQueryExamples(): Promise<Record<string, QueryExample[]>> {
   return fetchApi<Record<string, QueryExample[]>>('/api/query-examples')
+}
+
+// Get active task (single global task for all users)
+export async function getActiveTask(): Promise<TaskStatusResponse | null> {
+  return fetchApi<TaskStatusResponse | null>('/api/active-task')
 }
 
 // File download

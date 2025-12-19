@@ -49,18 +49,18 @@ function StatCard({
 }) {
   return (
     <motion.div variants={item}>
-      <Card className="relative overflow-hidden">
+      <Card className="relative overflow-hidden h-full">
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent" />
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
+        <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+          <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground line-clamp-1">
             {title}
           </CardTitle>
-          <Icon className="h-4 w-4 text-muted-foreground" />
+          <Icon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{value}</div>
+        <CardContent className="pt-0">
+          <div className="text-xl sm:text-2xl font-bold truncate">{value}</div>
           {description && (
-            <p className="text-xs text-muted-foreground mt-1">{description}</p>
+            <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{description}</p>
           )}
           {trend !== undefined && (
             <div className="flex items-center gap-1 mt-2">
@@ -88,29 +88,33 @@ function TaskItem({ task }: { task: TaskStatusResponse }) {
   return (
     <motion.div 
       variants={item}
-      className="flex items-center justify-between p-4 rounded-lg bg-card hover:bg-accent/50 transition-colors"
+      className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg bg-card hover:bg-accent/50 transition-colors gap-3"
     >
-      <div className="flex items-center gap-4">
-        <div className={`h-2 w-2 rounded-full ${
+      <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+        <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
           task.status === 'running' ? 'bg-blue-500 animate-pulse' :
           task.status === 'completed' ? 'bg-green-500' :
           task.status === 'failed' ? 'bg-red-500' :
           'bg-gray-500'
         }`} />
-        <div>
-          <p className="font-medium text-sm">{task.query}</p>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-sm truncate">{task.query}</p>
           <p className="text-xs text-muted-foreground">
             {task.data_source} • {task.processed_papers}/{task.max_papers} papers
           </p>
         </div>
       </div>
-      <div className="flex items-center gap-4">
-        {task.status === 'running' && (
-          <div className="w-24">
-            <Progress value={task.progress} className="h-1" />
-          </div>
-        )}
-        <Badge variant={statusColors[task.status]}>{task.status}</Badge>
+      <div className="flex items-center gap-3 sm:gap-4 justify-between sm:justify-end">
+        <div className="flex items-center gap-3">
+          {task.status === 'running' && (
+            <div className="w-20 sm:w-24">
+              <Progress value={task.progress} className="h-1" />
+            </div>
+          )}
+          <Badge variant={statusColors[task.status]} className="text-xs">
+            {task.status}
+          </Badge>
+        </div>
         <Link to={`/task/${task.task_id}`}>
           <Button variant="ghost" size="sm">
             <ArrowRight className="h-4 w-4" />
@@ -142,17 +146,17 @@ export default function Dashboard() {
     : 0
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground text-sm sm:text-base">
             Monitor your paper analysis tasks
           </p>
         </div>
         <Link to="/analyze">
-          <Button size="lg" className="gap-2">
+          <Button size="lg" className="gap-2 w-full sm:w-auto">
             <Zap className="h-4 w-4" />
             New Analysis
           </Button>
@@ -161,7 +165,7 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <motion.div 
-        className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+        className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4"
         variants={container}
         initial="hidden"
         animate="show"
@@ -241,25 +245,25 @@ export default function Dashboard() {
       {/* Quick Stats */}
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <Building2 className="h-5 w-5" />
               Data Sources
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {[
                 { name: 'ArXiv', status: true, description: 'Open-access preprints' },
                 { name: 'Semantic Scholar', status: !!health?.services?.semantic_scholar, description: 'Academic search' },
                 { name: 'OpenAlex', status: true, description: 'Open catalog' },
               ].map(source => (
-                <div key={source.name} className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">{source.name}</p>
-                    <p className="text-xs text-muted-foreground">{source.description}</p>
+                <div key={source.name} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm sm:text-base">{source.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{source.description}</p>
                   </div>
-                  <Badge variant={source.status ? 'success' : 'secondary'}>
+                  <Badge variant={source.status ? 'success' : 'secondary'} className="flex-shrink-0 text-xs">
                     {source.status ? 'Available' : 'Requires Key'}
                   </Badge>
                 </div>
@@ -269,14 +273,14 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <TrendingUp className="h-5 w-5" />
               Quick Start
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <p className="text-sm text-muted-foreground">
                 Popular search queries to get started:
               </p>
@@ -289,7 +293,7 @@ export default function Dashboard() {
                   'ti:transformer',
                 ].map(query => (
                   <Link key={query} to={`/analyze?query=${encodeURIComponent(query)}`}>
-                    <Badge variant="outline" className="cursor-pointer hover:bg-accent">
+                    <Badge variant="outline" className="cursor-pointer hover:bg-accent text-xs">
                       {query}
                     </Badge>
                   </Link>

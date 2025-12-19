@@ -72,19 +72,19 @@ export default function Results() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Results</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Results</h1>
+          <p className="text-muted-foreground text-sm sm:text-base">
             View and manage your analysis tasks
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40">
-              <Filter className="h-4 w-4 mr-2" />
+            <SelectTrigger className="w-32 sm:w-40">
+              <Filter className="h-4 w-4 mr-2 hidden sm:block" />
               <SelectValue placeholder="Filter" />
             </SelectTrigger>
             <SelectContent>
@@ -95,7 +95,7 @@ export default function Results() {
             </SelectContent>
           </Select>
           <Link to="/analyze">
-            <Button>New Analysis</Button>
+            <Button className="whitespace-nowrap">New Analysis</Button>
           </Link>
         </div>
       </div>
@@ -135,37 +135,37 @@ export default function Results() {
             return (
               <motion.div key={task.task_id} variants={item}>
                 <Card className="hover:border-primary/50 transition-colors">
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-4">
-                        <div className={`p-2 rounded-lg ${
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
+                        <div className={`p-2 rounded-lg flex-shrink-0 ${
                           task.status === 'completed' ? 'bg-green-500/10' :
                           task.status === 'failed' ? 'bg-red-500/10' :
                           task.status === 'running' ? 'bg-blue-500/10' :
                           'bg-muted'
                         }`}>
-                          <StatusIcon className={`h-5 w-5 ${
+                          <StatusIcon className={`h-4 sm:h-5 w-4 sm:w-5 ${
                             task.status === 'completed' ? 'text-green-500' :
                             task.status === 'failed' ? 'text-red-500' :
                             task.status === 'running' ? 'text-blue-500 animate-pulse' :
                             'text-muted-foreground'
                           }`} />
                         </div>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold font-mono">{task.query}</h3>
-                            <Badge variant={statusColors[task.status]}>
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold font-mono text-sm sm:text-base truncate max-w-[200px] sm:max-w-none">{task.query}</h3>
+                            <Badge variant={statusColors[task.status]} className="text-xs flex-shrink-0">
                               {task.status}
                             </Badge>
                           </div>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <FileText className="h-3 w-3" />
-                              {task.processed_papers}/{task.max_papers} papers
+                              {task.processed_papers}/{task.max_papers}
                             </span>
-                            <span>•</span>
+                            <span className="hidden sm:inline">•</span>
                             <span>{task.data_source}</span>
-                            <span>•</span>
+                            <span className="hidden sm:inline">•</span>
                             <span className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
                               {formatDuration(task.elapsed_seconds)}
@@ -175,24 +175,24 @@ export default function Results() {
                           {task.status === 'running' && (
                             <div className="mt-3 space-y-1">
                               <div className="flex justify-between text-xs">
-                                <span className="text-muted-foreground">
+                                <span className="text-muted-foreground truncate max-w-[200px] sm:max-w-none">
                                   {task.current_paper_title || task.stage}
                                 </span>
-                                <span>{task.progress.toFixed(0)}%</span>
+                                <span className="flex-shrink-0 ml-2">{task.progress.toFixed(0)}%</span>
                               </div>
                               <Progress value={task.progress} className="h-1" />
                             </div>
                           )}
                           
                           {task.errors.length > 0 && (
-                            <p className="text-xs text-red-500 mt-2">
+                            <p className="text-xs text-red-500 mt-2 line-clamp-1">
                               {task.errors[task.errors.length - 1]?.error}
                             </p>
                           )}
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 self-end sm:self-start">
                         <Button
                           variant="ghost"
                           size="icon"
