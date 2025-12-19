@@ -20,8 +20,8 @@ declare global {
   }
 }
 
-// Get API URL from runtime config (Docker) or build-time env (Vite)
-const API_BASE = window.ENV?.VITE_API_URL || import.meta.env.VITE_API_URL || ''
+// Use hardcoded production API URL
+const API_BASE = 'https://paper-agent-production.up.railway.app'
 
 async function fetchApi<T>(
   endpoint: string,
@@ -140,8 +140,6 @@ export function getDownloadUrl(taskId: string, filename: string): string {
 
 // WebSocket connection
 export function createWebSocket(taskId: string): WebSocket {
-  const wsUrl = window.ENV?.VITE_WS_URL || import.meta.env.VITE_WS_URL || 
-    (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
-  
+  const wsUrl = 'wss://paper-agent-production.up.railway.app'
   return new WebSocket(`${wsUrl}/ws/${taskId}`)
 }
